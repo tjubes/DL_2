@@ -14,6 +14,7 @@ def get_filepath():
     
     # Remove '/DL_2' or '\DL_2' from the path, depending on platform
     if os.name == 'nt':  # Windows
+        modified_path = localpath.replace('\DL_2', '')
         modified_path = localpath.replace('\\DL_2', '')
     else:  # Unix/Mac
         modified_path = localpath.replace('/DL_2', '')
