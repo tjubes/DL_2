@@ -11,13 +11,19 @@ def get_dataset_name(filename_with_dir):
 def get_filepath():
     # Get the directory where this Python file is located
     localpath = os.path.dirname(os.path.abspath(__file__))
-    # Remove '/DL_2' from the path
-    modified_path = localpath.replace('/DL_2', '')
+    
+    # Remove '/DL_2' or '\DL_2' from the path, depending on platform
+    if os.name == 'nt':  # Windows
+        modified_path = localpath.replace('\\DL_2', '')
+    else:  # Unix/Mac
+        modified_path = localpath.replace('/DL_2', '')
+        
     # Check if the Cross and Intra folders are extracted
     if not os.path.exists(os.path.join(modified_path, 'Cross')):
         modified_path = os.path.join(modified_path, 'Final Project data')
-        if not os.path.exists(os.path.join(modified_path, 'Cross')):
-            modified_path = os.path.join(modified_path, 'Final Project data')
+        
+    if not os.path.exists(os.path.join(modified_path, 'Cross')):
+        modified_path = os.path.join(modified_path, 'Final Project data')
         
     return modified_path
 
