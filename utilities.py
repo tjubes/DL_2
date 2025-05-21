@@ -13,6 +13,12 @@ def get_filepath():
     localpath = os.path.dirname(os.path.abspath(__file__))
     # Remove '/DL_2' from the path
     modified_path = localpath.replace('/DL_2', '')
+    # Check if the Cross and Intra folders are extracted
+    if not os.path.exists(os.path.join(modified_path, 'Cross')):
+        modified_path = os.path.join(modified_path, 'Final Project data')
+        if not os.path.exists(os.path.join(modified_path, 'Cross')):
+            modified_path = os.path.join(modified_path, 'Final Project data')
+        
     return modified_path
 
 def read_h5py_file(filename_path):
