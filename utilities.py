@@ -32,5 +32,5 @@ def read_h5py_file(filename_path):
     with h5py.File(filename_path, 'r') as f:
         dataset_name = get_dataset_name(filename_path)
         matrix = f.get(dataset_name)[()]
-        print(type(matrix))
-        print(matrix.shape)
+        print(f"Loaded: {type(matrix)}, Shape: {matrix.shape}")
+        return matrix
