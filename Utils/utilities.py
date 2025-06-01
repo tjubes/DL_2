@@ -6,9 +6,18 @@ import numpy as np
 from scipy.stats import zscore
 import matplotlib.pyplot as plt
 import torch
+import torch.nn as nn
 import sys
 from torch.utils.data import Dataset, DataLoader, Subset
+import random
+from sklearn.model_selection import train_test_split, StratifiedKFold
 
+def set_seed(seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
 def get_dataset_name(filename_with_dir):
     filepath = Path(filename_with_dir)
@@ -108,6 +117,22 @@ def normalize_meg_data(data_list, downsample_factor=None):
 
     return normalized_data
 
+class MEGDataset(Dataset):
+    """Custom Dataset for MEG data"""
+    def __init__(self, data_list, labels, label_map):
+        self.data_list = data_list
+        self.labels = labels
+        self.label_map = label_map 
+
+    def __len__(self):
+        return len(self.data_list)
+
+    def __getitem__(self, idx):
+        data = self.data_list[idx]        
+        data = torch.FloatTensor(data).unsqueeze(0)        
+        label = torch.LongTensor([self.label_map[self.labels[idx]]]).squeeze()
+        return data, label
+
 
 def plot_meg_sample(sample, label, num_channels=10):
     """
@@ -200,8 +225,163 @@ class EarlyStopper:
         else:
             self.counter += 1
             return self.counter >= self.patience
+        
 
 
+def train_val_test_experiment(
+    train_data, train_labels,
+    val_data, val_labels,
+    test_data, test_labels,
+    label_map,
+    model_fn,  # <- model factory function passed as an argument
+    epochs=50, batch_size=4, seed=42
+):
+    """Train/Val/Test experiment"""
+
+    set_seed(seed)
+
+    # Create DataLoaders
+    train_loader = DataLoader(MEGDataset(train_data, train_labels, label_map), batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(MEGDataset(val_data, val_labels, label_map), batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(MEGDataset(test_data, test_labels, label_map), batch_size=batch_size, shuffle=False)
+
+    # Setup
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = model_fn().to(device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-3)
+
+    early_stopper = EarlyStopper(patience=6)
+    train_losses, train_accs, val_losses, val_accs = [], [], [], []
+    best_val_acc = 0.0
+
+    for epoch in range(epochs):
+        train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device)
+        val_loss, val_acc, _, _ = evaluate_model(model, val_loader, criterion, device)
+
+        train_losses.append(train_loss)
+        train_accs.append(train_acc)
+        val_losses.append(val_loss)
+        val_accs.append(val_acc)
+
+        if epoch % 10 == 0 or epoch == epochs - 1:
+            print(f"Epoch {epoch}: Train Acc={train_acc:.3f}, Val Acc={val_acc:.3f}")
+
+        if early_stopper.check(val_acc):
+            print(f"Early stopping at epoch {epoch}")
+            break
+
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+
+    # Final evaluation on test set
+    test_loss, test_acc, test_preds, test_true = evaluate_model(model, test_loader, criterion, device)
+
+    print(f"\n✅ Test Accuracy: {test_acc:.4f}")
+
+    return {
+        'train_losses': train_losses,
+        'train_accs': train_accs,
+        'val_losses': val_losses,
+        'val_accs': val_accs,
+        'test_acc': test_acc,
+        'test_loss': test_loss,
+        'test_preds': test_preds,
+        'test_true': test_true,
+        'best_val_acc': best_val_acc
+    }
+
+
+def cross_validation_experiment(
+    all_data, all_labels, label_map,
+    model_fn,  # <- model factory function passed as an argument
+    n_splits=4, epochs=50, batch_size=4
+):
+    """Complete cross-validation experiment using a model factory function"""
+
+    # Convert labels to indices
+    label_indices = [label_map[label] for label in all_labels]
+
+    # Initialize cross-validation
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+
+    # Store results
+    fold_results = []
+    all_histories = []
+
+    print(f"\n{'='*60}")
+    print(f"  CROSS-VALIDATION EXPERIMENT ({n_splits} folds)")
+    print(f"{'='*60}")
+    print(f"Total samples: {len(all_data)}")
+    print(f"Samples per fold - Train: ~{len(all_data) * (n_splits-1) // n_splits}, Val: ~{len(all_data) // n_splits}")
+
+    for fold, (train_idx, val_idx) in enumerate(skf.split(all_data, label_indices)):
+        print(f"\n--- FOLD {fold + 1}/{n_splits} ---")
+
+        # Create datasets
+        full_dataset = MEGDataset(all_data, all_labels, label_map)
+        train_dataset = Subset(full_dataset, train_idx)
+        val_dataset = Subset(full_dataset, val_idx)
+
+        # Create dataloaders
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+
+        # Initialize a fresh model using the factory function
+        model = model_fn()
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = model.to(device)
+
+        criterion = nn.CrossEntropyLoss()
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-3)
+
+        train_losses, train_accs = [], []
+        val_losses, val_accs = [], []
+
+        early_stopper = EarlyStopper(patience=15)
+        best_val_acc = 0.0
+
+        for epoch in range(epochs):
+            train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device)
+            val_loss, val_acc, _, _ = evaluate_model(model, val_loader, criterion, device)
+
+            train_losses.append(train_loss)
+            train_accs.append(train_acc)
+            val_losses.append(val_loss)
+            val_accs.append(val_acc)
+
+            if epoch % 10 == 0 or epoch == epochs - 1:
+                print(f"Epoch {epoch:2d}: Train Acc={train_acc:.3f}, Val Acc={val_acc:.3f}, Val Loss={val_loss:.3f}")
+
+            if early_stopper.check(val_acc):
+                print(f"Early stopping at epoch {epoch}")
+                break
+
+            if val_acc > best_val_acc:
+                best_val_acc = val_acc
+
+        final_val_loss, final_val_acc, val_preds, val_true = evaluate_model(model, val_loader, criterion, device)
+
+        fold_results.append({
+            'fold': fold + 1,
+            'best_val_acc': best_val_acc,
+            'final_val_acc': final_val_acc,
+            'val_predictions': val_preds,
+            'val_true': val_true,
+            'train_idx': train_idx,
+            'val_idx': val_idx
+        })
+
+        all_histories.append({
+            'train_losses': train_losses,
+            'train_accs': train_accs,
+            'val_losses': val_losses,
+            'val_accs': val_accs
+        })
+
+        print(f"Fold {fold + 1} Best Val Accuracy: {best_val_acc:.4f}")
+
+    return fold_results, all_histories
 
 
 
