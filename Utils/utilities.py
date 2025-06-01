@@ -155,6 +155,13 @@ def plot_meg_sample(sample, label, num_channels=10):
     plt.grid(True)
     plt.show()
 
+def create_dataloaders(data, labels, label_map, batch_size=4, suffle=True, num_workers=0):  
+    """Create PyTorch DataLoaders from your loaded data"""    
+    # Create dataset
+    dataset = MEGDataset(data, labels, label_map)
+    # Create dataloaders
+    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=suffle, num_workers=num_workers)    
+    return data_loader
 
 
 def train_one_epoch(model, dataloader, criterion, optimizer, device='cpu'):
@@ -234,6 +241,8 @@ def train_val_test_experiment(
     test_data, test_labels,
     label_map,
     model_fn,  # <- model factory function passed as an argument
+    optimizer, 
+    criterion,
     epochs=50, batch_size=4, seed=42
 ):
     """Train/Val/Test experiment"""
@@ -293,9 +302,13 @@ def train_val_test_experiment(
 
 
 def cross_validation_experiment(
-    all_data, all_labels, label_map,
+    all_data, 
+    all_labels, 
+    label_map,
     model_fn,  # <- model factory function passed as an argument
-    n_splits=4, epochs=50, batch_size=4
+    n_splits=4, 
+    epochs=50, 
+    batch_size=4
 ):
     """Complete cross-validation experiment using a model factory function"""
 
@@ -338,7 +351,7 @@ def cross_validation_experiment(
         train_losses, train_accs = [], []
         val_losses, val_accs = [], []
 
-        early_stopper = EarlyStopper(patience=15)
+        early_stopper = EarlyStopper(patience=6)
         best_val_acc = 0.0
 
         for epoch in range(epochs):
@@ -471,3 +484,157 @@ def analyze_cv_results(fold_results, all_histories, label_map):
     plt.show()
     
     return np.mean(best_accs), np.std(best_accs)
+
+
+
+
+##################################
+# ---- Final Model Training ---- #
+##################################
+
+
+
+def train_final_model(
+    all_data,
+    all_labels,
+    label_map,
+    model_fn,
+    save_path='final_model.pt',
+    epochs=50,
+    batch_size=4,
+    lr=0.001,
+    weight_decay=1e-3,
+    seed=42
+):
+    """
+    Train a model on the full dataset and save the trained parameters.
+
+    Args:
+        all_data: all training input data
+        all_labels: all training labels
+        label_map: dictionary mapping class labels to indices
+        model_fn: factory function to create the model
+        save_path: filename for saving model weights
+        epochs: number of training epochs
+        batch_size: training batch size
+        seed: random seed
+    Returns:
+        trained model
+    """
+    set_seed(seed)
+
+    # Setup device and model
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model_fn().to(device)
+
+    # Dataset and DataLoader
+    train_dataset = MEGDataset(all_data, all_labels, label_map)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+
+    # Loss and optimizer
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+    # Training loop
+    for epoch in range(epochs):
+        model.train()
+        total_loss = 0
+        correct = 0
+        total = 0
+
+        for inputs, labels in train_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item() * inputs.size(0)
+            _, predicted = torch.max(outputs, 1)
+            correct += (predicted == labels).sum().item()
+            total += labels.size(0)
+
+        epoch_loss = total_loss / total
+        epoch_acc = correct / total
+        print(f"Epoch {epoch+1}/{epochs}: Loss = {epoch_loss:.4f}, Accuracy = {epoch_acc:.4f}")
+
+    # Save final model
+    torch.save(model.state_dict(), save_path)
+    print(f"\n✅ Final model trained and saved to: {save_path}")
+
+    return model
+
+
+#######################
+# ---- Test Eval ---- #
+#######################
+
+def evaluate_on_test_set(model, test_loader, criterion, label_map, device=None):
+    """
+    Evaluate a trained model on the test set and show performance metrics.
+    
+    Args:
+        model: trained PyTorch model
+        test_loader: DataLoader for the test set
+        criterion: loss function
+        label_map: dict, maps label names to indices
+        device: optional, torch.device
+    Returns:
+        test_loss, test_accuracy, predictions, true_labels
+    """
+
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    model = model.to(device)
+    model.eval()
+
+    total_loss = 0.0
+    correct = 0
+    total = 0
+    all_preds = []
+    all_true = []
+
+    with torch.no_grad():
+        for inputs, labels in test_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+
+            total_loss += loss.item() * inputs.size(0)
+            _, predicted = torch.max(outputs, 1)
+            correct += (predicted == labels).sum().item()
+            total += labels.size(0)
+
+            all_preds.extend(predicted.cpu().numpy())
+            all_true.extend(labels.cpu().numpy())
+
+    avg_loss = total_loss / total
+    accuracy = correct / total
+
+    print(f"\n📊 Test Set Results:")
+    print(f"  Loss     : {avg_loss:.4f}")
+    print(f"  Accuracy : {accuracy:.4f} ({accuracy * 100:.2f}%)")
+
+    # Confusion Matrix
+    from sklearn.metrics import confusion_matrix
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+
+    reverse_label_map = {v: k for k, v in label_map.items()}
+    label_names = [reverse_label_map[i] for i in range(len(label_map))]
+
+    cm = confusion_matrix(all_true, all_preds)
+
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                xticklabels=label_names, yticklabels=label_names)
+    plt.title('Test Set Confusion Matrix')
+    plt.xlabel('Predicted')
+    plt.ylabel('True')
+    plt.tight_layout()
+    plt.show()
+
+    return avg_loss, accuracy, all_preds, all_true
