@@ -6,6 +6,7 @@ import numpy as np
 from scipy.stats import zscore
 import matplotlib.pyplot as plt
 import torch
+import sys
 from torch.utils.data import Dataset, DataLoader, Subset
 
 
@@ -182,6 +183,27 @@ def evaluate_model(model, dataloader, criterion, device='cpu'):
 
 
 
+class EarlyStopper:
+    def __init__(self, patience=15):
+        self.patience = patience
+        self.best_score = None
+        self.counter = 0
+
+    def check(self, current_score):
+        """
+        Returns True if training should stop (i.e., patience exceeded).
+        """
+        if self.best_score is None or current_score > self.best_score:
+            self.best_score = current_score
+            self.counter = 0
+            return False
+        else:
+            self.counter += 1
+            return self.counter >= self.patience
+
+
+
+
 
 def analyze_cv_results(fold_results, all_histories, label_map):
     """Analyze cross-validation results"""
@@ -203,6 +225,8 @@ def analyze_cv_results(fold_results, all_histories, label_map):
     print(f"  Mean Accuracy: {np.mean(best_accs):.4f} ± {np.std(best_accs):.4f}")
     print(f"  Best Fold: {np.max(best_accs):.4f}")
     print(f"  Worst Fold: {np.min(best_accs):.4f}")
+
+    sys.stdout.flush()
     
     # Plot training curves
     plt.figure(figsize=(15, 5))
