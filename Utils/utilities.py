@@ -4,6 +4,9 @@ import os
 from pathlib import Path
 import numpy as np
 from scipy.stats import zscore
+import matplotlib.pyplot as plt
+import torch
+from torch.utils.data import Dataset, DataLoader, Subset
 
 
 def get_dataset_name(filename_with_dir):
@@ -103,3 +106,164 @@ def normalize_meg_data(data_list, downsample_factor=None):
         normalized_data.append(norm_matrix)
 
     return normalized_data
+
+
+def plot_meg_sample(sample, label, num_channels=10):
+    """
+    Plot the first few MEG sensor time series from a single sample.
+    
+    Parameters:
+    - sample (np.array): The MEG data matrix of shape (248, time_steps)
+    - label (str): The task label for the sample
+    - num_channels (int): Number of sensor channels to plot
+    """
+    plt.figure(figsize=(12, 6))
+    time_steps = sample.shape[1]
+    
+    for i in range(num_channels):
+        plt.plot(np.arange(time_steps), sample[i] + i * 10, label=f'Channel {i}')
+    
+    plt.title(f'MEG Sample - Label: {label}')
+    plt.xlabel('Time Steps')
+    plt.ylabel('Amplitude (offset for clarity)')
+    plt.grid(True)
+    plt.show()
+
+
+
+def train_one_epoch(model, dataloader, criterion, optimizer, device='cpu'):
+    """Train for one epoch"""
+    model.train()
+    total_loss = 0.0  
+    correct = 0 
+    total = 0 
+    
+    for inputs, labels in dataloader: 
+        inputs, labels = inputs.to(device), labels.to(device)
+        
+        optimizer.zero_grad()
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+        
+        total_loss += loss.item()
+        _, predicted = torch.max(outputs.data, 1)
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+    
+    avg_loss = total_loss / len(dataloader)
+    accuracy = correct / total
+    return avg_loss, accuracy
+
+
+def evaluate_model(model, dataloader, criterion, device='cpu'):
+    """Evaluate model"""
+    model.eval()
+    total_loss = 0.0
+    all_predictions = []
+    all_labels = []
+    
+    with torch.no_grad():
+        for inputs, labels in dataloader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            
+            total_loss += loss.item()
+            _, predicted = torch.max(outputs, 1)
+            all_predictions.extend(predicted.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+    
+    avg_loss = total_loss / len(dataloader)
+    accuracy = len([1 for i, j in zip(all_predictions, all_labels) if i == j]) / len(all_labels)
+    
+    return avg_loss, accuracy, all_predictions, all_labels
+
+
+
+
+def analyze_cv_results(fold_results, all_histories, label_map):
+    """Analyze cross-validation results"""
+    
+    print(f"\n{'='*60}")
+    print(f"  CROSS-VALIDATION RESULTS SUMMARY")
+    print(f"{'='*60}")
+    
+    # Extract accuracies
+    best_accs = [result['best_val_acc'] for result in fold_results]
+    final_accs = [result['final_val_acc'] for result in fold_results]
+    
+    # Summary statistics
+    print(f"\nBest Validation Accuracies per Fold:")
+    for i, acc in enumerate(best_accs):
+        print(f"  Fold {i+1}: {acc:.4f} ({acc*100:.2f}%)")
+    
+    print(f"\nCross-Validation Summary:")
+    print(f"  Mean Accuracy: {np.mean(best_accs):.4f} ± {np.std(best_accs):.4f}")
+    print(f"  Best Fold: {np.max(best_accs):.4f}")
+    print(f"  Worst Fold: {np.min(best_accs):.4f}")
+    
+    # Plot training curves
+    plt.figure(figsize=(15, 5))
+    
+    # Training loss
+    plt.subplot(1, 3, 1)
+    for i, history in enumerate(all_histories):
+        plt.plot(history['train_losses'], label=f'Fold {i+1}', alpha=0.7)
+    plt.title('Training Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    # Training accuracy
+    plt.subplot(1, 3, 2)
+    for i, history in enumerate(all_histories):
+        plt.plot(history['train_accs'], label=f'Fold {i+1}', alpha=0.7)
+    plt.title('Training Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    # Validation accuracy
+    plt.subplot(1, 3, 3)
+    for i, history in enumerate(all_histories):
+        plt.plot(history['val_accs'], label=f'Fold {i+1}', alpha=0.7)
+    plt.title('Validation Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # Overall confusion matrix (combine all folds)
+    all_predictions = []
+    all_true_labels = []
+    
+    for result in fold_results:
+        all_predictions.extend(result['val_predictions'])
+        all_true_labels.extend(result['val_true'])
+    
+    # Use your existing analyze_results function
+    from sklearn.metrics import confusion_matrix
+    import seaborn as sns
+    
+    reverse_label_map = {v: k for k, v in label_map.items()}
+    label_names = [reverse_label_map[i] for i in range(len(label_map))]
+    
+    cm = confusion_matrix(all_true_labels, all_predictions)
+    
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                xticklabels=label_names, yticklabels=label_names)
+    plt.title('Cross-Validation - Combined Confusion Matrix')
+    plt.ylabel('True Label')
+    plt.xlabel('Predicted Label')
+    plt.tight_layout()
+    plt.show()
+    
+    return np.mean(best_accs), np.std(best_accs)
