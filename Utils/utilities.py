@@ -235,32 +235,41 @@ class EarlyStopper:
         
 
 
-def train_val_test_experiment(
-    train_data, train_labels,
-    val_data, val_labels,
-    test_data, test_labels,
+def train_val_experiment(
+    train_loader,
+    val_loader,
+    model_fn,
     label_map,
-    model_fn,  # <- model factory function passed as an argument
-    optimizer, 
-    criterion,
-    epochs=50, batch_size=4, seed=42
+    lr=1e-3, 
+    weight_decay=1e-5,
+    epochs=50, 
+    seed=42
 ):
-    """Train/Val/Test experiment"""
+    """
+    Train/Val experiment using pre-built DataLoaders.
+    
+    Args:
+        train_loader: DataLoader for training data
+        val_loader: DataLoader for validation data
+        model_fn: function that returns a new model instance
+        label_map: dict mapping class labels to indices (not used here but kept for consistency)
+        optimizer: optional custom optimizer
+        criterion: optional custom loss function
+        epochs: max number of training epochs
+        seed: random seed for reproducibility
+    Returns:
+        dict with training/validation loss & accuracy history and best val acc
+    """
 
     set_seed(seed)
 
-    # Create DataLoaders
-    train_loader = DataLoader(MEGDataset(train_data, train_labels, label_map), batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(MEGDataset(val_data, val_labels, label_map), batch_size=batch_size, shuffle=False)
-    test_loader = DataLoader(MEGDataset(test_data, test_labels, label_map), batch_size=batch_size, shuffle=False)
-
-    # Setup
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model_fn().to(device)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-3)
 
-    early_stopper = EarlyStopper(patience=6)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+    early_stopper = EarlyStopper(patience=10)
     train_losses, train_accs, val_losses, val_accs = [], [], [], []
     best_val_acc = 0.0
 
@@ -283,22 +292,59 @@ def train_val_test_experiment(
         if val_acc > best_val_acc:
             best_val_acc = val_acc
 
-    # Final evaluation on test set
-    test_loss, test_acc, test_preds, test_true = evaluate_model(model, test_loader, criterion, device)
-
-    print(f"\n✅ Test Accuracy: {test_acc:.4f}")
-
     return {
         'train_losses': train_losses,
         'train_accs': train_accs,
         'val_losses': val_losses,
         'val_accs': val_accs,
-        'test_acc': test_acc,
-        'test_loss': test_loss,
-        'test_preds': test_preds,
-        'test_true': test_true,
         'best_val_acc': best_val_acc
     }
+
+
+
+
+def analyze_train_val_results(results):
+    """
+    Analyze and visualize training and validation results.
+
+    Args:
+        results: dictionary returned by train_val_experiment()
+    """
+    import matplotlib.pyplot as plt
+
+    print(f"\n{'='*60}")
+    print("  TRAIN/VALIDATION RESULTS SUMMARY")
+    print(f"{'='*60}")
+
+    print(f"\n📈 Best Validation Accuracy: {results['best_val_acc']:.4f}")
+
+    # Plot training and validation loss
+    plt.figure(figsize=(12, 5))
+
+    # Loss plot
+    plt.subplot(1, 2, 1)
+    plt.plot(results['train_losses'], label='Train Loss')
+    plt.plot(results['val_losses'], label='Val Loss')
+    plt.title('Loss Curve')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+
+    # Accuracy plot
+    plt.subplot(1, 2, 2)
+    plt.plot(results['train_accs'], label='Train Accuracy')
+    plt.plot(results['val_accs'], label='Val Accuracy')
+    plt.title('Accuracy Curve')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
+
+
 
 
 def cross_validation_experiment(
@@ -346,12 +392,12 @@ def cross_validation_experiment(
         model = model.to(device)
 
         criterion = nn.CrossEntropyLoss()
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-3)
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
 
         train_losses, train_accs = [], []
         val_losses, val_accs = [], []
 
-        early_stopper = EarlyStopper(patience=6)
+        early_stopper = EarlyStopper(patience=10)
         best_val_acc = 0.0
 
         for epoch in range(epochs):
@@ -503,7 +549,7 @@ def train_final_model(
     epochs=50,
     batch_size=4,
     lr=0.001,
-    weight_decay=1e-3,
+    weight_decay=1e-5,
     seed=42
 ):
     """
