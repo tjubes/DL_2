@@ -216,7 +216,7 @@ def evaluate_model(model, dataloader, criterion, device='cpu'):
 
 
 class EarlyStopper:
-    def __init__(self, patience=15):
+    def __init__(self, patience=12):
         self.patience = patience
         self.best_score = None
         self.counter = 0
@@ -267,7 +267,7 @@ def train_val_experiment(
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    early_stopper = EarlyStopper(patience=10)
+    early_stopper = EarlyStopper(patience=12)
     train_losses, train_accs, val_losses, val_accs = [], [], [], []
     best_val_acc = 0.0
 
@@ -390,7 +390,7 @@ def cross_validation_experiment(
         model = model.to(device)
 
         criterion = nn.CrossEntropyLoss()
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-5)
 
         train_losses, train_accs = [], []
         val_losses, val_accs = [], []
