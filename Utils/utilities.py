@@ -253,8 +253,6 @@ def train_val_experiment(
         val_loader: DataLoader for validation data
         model_fn: function that returns a new model instance
         label_map: dict mapping class labels to indices (not used here but kept for consistency)
-        optimizer: optional custom optimizer
-        criterion: optional custom loss function
         epochs: max number of training epochs
         seed: random seed for reproducibility
     Returns:
