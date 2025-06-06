@@ -99,10 +99,16 @@ def load_h5_files(directory_path, max_files=None):
 
 def normalize_meg_data(data_list, downsample_factor=None):
     """
-    Normalize a list of MEG matrices using z-score normalization per channel.
-    
-    Returns:
-        List of normalized (and optionally downsampled) data
+    1. Normalize a list of MEG matrices using z-score normalization per channel.
+    2. Optionally downsample the data by a specified factor.   
+            According to the project document, the MEG data is recorded at 2034 Hz — that is, 2034 samples per second
+            The Nyquist theorem says you must sample at least twice the highest frequency present in your signal to avoid losing information.
+            MEG signals of interest often contain activity up to about 100 Hz (sometimes more for very fast neural activity).
+            So a downsampled rate of 200–500 Hz is usually sufficient.
+            From 2034 Hz, you might consider downsampling to:
+                508.5 Hz (divide by 4)
+                406.8 Hz (divide by 5)
+                203.4 Hz (divide by 10)
     """
     normalized_data = []
 
@@ -216,7 +222,7 @@ def evaluate_model(model, dataloader, criterion, device='cpu'):
 
 
 class EarlyStopper:
-    def __init__(self, patience=12):
+    def __init__(self, patience=10):
         self.patience = patience
         self.best_score = None
         self.counter = 0
@@ -243,6 +249,7 @@ def train_val_experiment(
     lr=1e-3, 
     weight_decay=1e-5,
     epochs=50, 
+    patience=12,
     seed=42
 ):
     """
@@ -267,7 +274,7 @@ def train_val_experiment(
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    early_stopper = EarlyStopper(patience=12)
+    early_stopper = EarlyStopper(patience=patience)
     train_losses, train_accs, val_losses, val_accs = [], [], [], []
     best_val_acc = 0.0
 
