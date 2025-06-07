@@ -397,7 +397,7 @@ def cross_validation_experiment(
         model = model.to(device)
 
         criterion = nn.CrossEntropyLoss()
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-5)
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
 
         train_losses, train_accs = [], []
         val_losses, val_accs = [], []
