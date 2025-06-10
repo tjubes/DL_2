@@ -357,11 +357,16 @@ def cross_validation_experiment(
     all_labels, 
     label_map,
     model_fn,  # <- model factory function passed as an argument
+    lr=1e-3,
+    weight_decay=1e-5,
+    patience=10,
     n_splits=4, 
     epochs=50, 
-    batch_size=4
+    batch_size=4,
+    seed = 42
 ):
     """Complete cross-validation experiment using a model factory function"""
+    set_seed(seed)
 
     # Convert labels to indices
     label_indices = [label_map[label] for label in all_labels]
@@ -397,12 +402,12 @@ def cross_validation_experiment(
         model = model.to(device)
 
         criterion = nn.CrossEntropyLoss()
-        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
         train_losses, train_accs = [], []
         val_losses, val_accs = [], []
 
-        early_stopper = EarlyStopper(patience=10)
+        early_stopper = EarlyStopper(patience)
         best_val_acc = 0.0
 
         for epoch in range(epochs):
