@@ -450,7 +450,7 @@ def cross_validation_experiment(
 
         print(f"Fold {fold + 1} Best Val Accuracy: {best_val_acc:.4f}")
 
-    return fold_results, all_histories
+    return fold_results, all_histories 
 
 
 
