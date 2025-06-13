@@ -22,7 +22,7 @@ class CNN2D_LSTM_Net(nn.Module):
         # This block extracts local patterns in both space (sensor layout) and time.
         self.cnn = nn.Sequential(
             # Conv Layer 1: kernel, stride reduces resolution
-            nn.Conv2d(1, 32, kernel_size=(5, 25), stride=(2, 5), padding=(2, 12)),
+            nn.Conv2d(1, 32, kernel_size=(5, 15), stride=(2, 4), padding=(2, 12)),
             nn.BatchNorm2d(32),
             nn.ReLU(),
             nn.Dropout2d(dropout),
