@@ -93,8 +93,8 @@ def load_and_normalize_files_batch(directory_path, batch_size=8, downsample_fact
     tuple: (batch_data, batch_labels) for each batch
     """
     h5_files = [f for f in os.listdir(directory_path) if f.endswith('.h5')]
-    if verbose:
-        print(f"Found {len(h5_files)} files in {directory_path}")
+    # if verbose:
+    #     print(f"Found {len(h5_files)} files in {directory_path}")
     
     # Process files in batches
     for i in range(0, len(h5_files), batch_size):
@@ -264,7 +264,7 @@ def evaluate_model_batched(model,
 
 
 class EarlyStopper:
-    def __init__(self, patience=20, min_delta=0.001):
+    def __init__(self, patience=12, min_delta=0.001):
         self.patience = patience
         self.min_delta = min_delta
         self.counter = 0
@@ -430,8 +430,8 @@ def evaluate_cross_subject_model(filepath,
             continue
 
         # Get number of files
-        h5_files = [f for f in os.listdir(test_path) if f.endswith('.h5')]
-        print(f"Found {len(h5_files)} files in {test_set}")
+        # h5_files = [f for f in os.listdir(test_path) if f.endswith('.h5')]
+        # print(f"Found {len(h5_files)} files in {test_set}")
 
         # Evaluate
         test_loss, test_acc, predictions, true_labels = evaluate_model_batched(
