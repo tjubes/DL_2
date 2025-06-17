@@ -164,7 +164,7 @@ def train_one_epoch_batched(model,
 
         # === Train ===
         train_dataset = MEGDataset(batch_data, batch_labels, label_map)
-        train_loader = DataLoader(train_dataset, batch_size=dataloader_batch_size, shuffle=True)
+        train_loader = DataLoader(train_dataset, batch_size=dataloader_batch_size, shuffle=True, seed=42)
 
         for inputs, labels in train_loader:
             inputs, labels = inputs.to(device), labels.to(device)

@@ -352,6 +352,7 @@ def analyze_train_val_results(results):
 
 
 
+
 def cross_validation_experiment(
     all_data, 
     all_labels, 
@@ -543,14 +544,6 @@ def analyze_cv_results(fold_results, all_histories, label_map):
 
 
 
-##################################
-
-# ---- CROSS-SUBJECT TRAINING ---- #
-
-##################################
-
-
-
 
 
 
@@ -564,107 +557,108 @@ def analyze_cv_results(fold_results, all_histories, label_map):
 ##################################
 
 
-
-def train_final_model(
-    all_data,
-    all_labels,
+def train_on_all_data(
+    all_data, 
+    all_labels, 
     label_map,
     model_fn,
-    save_path='final_model.pt',
+    lr=1e-3,
+    weight_decay=1e-5,
     epochs=50,
     batch_size=4,
-    lr=0.001,
-    weight_decay=1e-5,
     seed=42
 ):
-    """
-    Train a model on the full dataset and save the trained parameters.
-
-    Args:
-        all_data: all training input data
-        all_labels: all training labels
-        label_map: dictionary mapping class labels to indices
-        model_fn: factory function to create the model
-        save_path: filename for saving model weights
-        epochs: number of training epochs
-        batch_size: training batch size
-        seed: random seed
-    Returns:
-        trained model
-    """
+    """Train a model using all available data without validation."""
     set_seed(seed)
 
-    # Setup device and model
+    print(f"\n{'='*60}")
+    print(f"  TRAINING ON FULL DATA")
+    print(f"{'='*60}")
+    print(f"Total samples: {len(all_data)}")
+
+    # Create dataset and dataloader
+    dataset = MEGDataset(all_data, all_labels, label_map)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+
+    # Initialize model
+    model = model_fn()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model_fn().to(device)
+    model = model.to(device)
 
-    # Dataset and DataLoader
-    train_dataset = MEGDataset(all_data, all_labels, label_map)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
-
-    # Loss and optimizer
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    # Training loop
+    train_losses = []
+    train_accs = []
+
     for epoch in range(epochs):
-        model.train()
-        total_loss = 0
-        correct = 0
-        total = 0
+        loss, acc = train_one_epoch(model, dataloader, criterion, optimizer, device)
+        train_losses.append(loss)
+        train_accs.append(acc)
 
-        for inputs, labels in train_loader:
-            inputs, labels = inputs.to(device), labels.to(device)
+        if epoch % 10 == 0 or epoch == epochs - 1:
+            print(f"Epoch {epoch:2d}: Train Loss={loss:.3f}, Train Acc={acc:.3f}")
 
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
+    torch.save(model.state_dict(), "best_model_Intra.pth")
 
-            total_loss += loss.item() * inputs.size(0)
-            _, predicted = torch.max(outputs, 1)
-            correct += (predicted == labels).sum().item()
-            total += labels.size(0)
+    print(f"\n✅ Training completed. Final training accuracy: {train_accs[-1]:.3f}")
+    return model, train_losses, train_accs
 
-        epoch_loss = total_loss / total
-        epoch_acc = correct / total
-        print(f"Epoch {epoch+1}/{epochs}: Loss = {epoch_loss:.4f}, Accuracy = {epoch_acc:.4f}")
+import matplotlib.pyplot as plt
 
-    # Save final model
-    torch.save(model.state_dict(), save_path)
-    print(f"\n✅ Final model trained and saved to: {save_path}")
+def plot_training_curves(train_accs, train_losses, test_acc=None, random_acc=0.25):
+    epochs = range(1, len(train_accs) + 1)
 
-    return model
+    plt.figure(figsize=(12, 4))
+
+    # --- Accuracy Plot ---
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs, train_accs, label='Train Accuracy', color='blue')
+    
+    if test_acc is not None:
+        plt.axhline(y=test_acc, color='red', linestyle='--', label=f'Test Accuracy ({test_acc:.2f})')
+    
+    plt.axhline(y=random_acc, color='gray', linestyle='--', label=f'Random Accuracy ({random_acc:.2f})')
+
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.title('Training Accuracy')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+
+    # --- Loss Plot ---
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs, train_losses, label='Train Loss', color='orange')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Training Loss')
+    plt.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
+
+
 
 
 #######################
 # ---- Test Eval ---- #
 #######################
 
-def evaluate_on_test_set(model, test_loader, criterion, label_map, device=None):
-    """
-    Evaluate a trained model on the test set and show performance metrics.
-    
-    Args:
-        model: trained PyTorch model
-        test_loader: DataLoader for the test set
-        criterion: loss function
-        label_map: dict, maps label names to indices
-        device: optional, torch.device
-    Returns:
-        test_loss, test_accuracy, predictions, true_labels
-    """
+from sklearn.metrics import classification_report, confusion_matrix
+import seaborn as sns
+import matplotlib.pyplot as plt
 
-    if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    model = model.to(device)
+def evaluate_on_test_set(model_fn, test_data, test_labels, label_map, batch_size=4):
+    """Evaluate model on test data and print metrics + confusion matrix."""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model_fn()  # or whichever model factory you're using
+    model.load_state_dict(torch.load("best_model_Intra.pth", map_location=device))
+    model.to(device)
     model.eval()
 
-    total_loss = 0.0
-    correct = 0
-    total = 0
+    test_dataset = MEGDataset(test_data, test_labels, label_map)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
     all_preds = []
     all_true = []
 
@@ -672,40 +666,27 @@ def evaluate_on_test_set(model, test_loader, criterion, label_map, device=None):
         for inputs, labels in test_loader:
             inputs, labels = inputs.to(device), labels.to(device)
             outputs = model(inputs)
-            loss = criterion(outputs, labels)
-
-            total_loss += loss.item() * inputs.size(0)
-            _, predicted = torch.max(outputs, 1)
-            correct += (predicted == labels).sum().item()
-            total += labels.size(0)
-
-            all_preds.extend(predicted.cpu().numpy())
+            _, preds = torch.max(outputs, 1)
+            all_preds.extend(preds.cpu().numpy())
             all_true.extend(labels.cpu().numpy())
 
-    avg_loss = total_loss / total
-    accuracy = correct / total
-
-    print(f"\n📊 Test Set Results:")
-    print(f"  Loss     : {avg_loss:.4f}")
-    print(f"  Accuracy : {accuracy:.4f} ({accuracy * 100:.2f}%)")
+    # Classification report
+    target_names = [k for k, _ in sorted(label_map.items(), key=lambda x: x[1])]
+    print("\n=== Classification Report ===")
+    print(classification_report(all_true, all_preds, target_names=target_names, digits=3))
 
     # Confusion Matrix
-    from sklearn.metrics import confusion_matrix
-    import seaborn as sns
-    import matplotlib.pyplot as plt
-
-    reverse_label_map = {v: k for k, v in label_map.items()}
-    label_names = [reverse_label_map[i] for i in range(len(label_map))]
-
     cm = confusion_matrix(all_true, all_preds)
-
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(6, 5))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                xticklabels=label_names, yticklabels=label_names)
-    plt.title('Test Set Confusion Matrix')
-    plt.xlabel('Predicted')
-    plt.ylabel('True')
+                xticklabels=target_names, yticklabels=target_names)
+    plt.xlabel("Predicted")
+    plt.ylabel("True")
+    plt.title("Confusion Matrix")
     plt.tight_layout()
     plt.show()
 
-    return avg_loss, accuracy, all_preds, all_true
+    # Accuracy
+    accuracy = np.mean(np.array(all_preds) == np.array(all_true))
+    print(f"\n✅ Accuracy: {accuracy:.4f}")
+    return accuracy, all_preds, all_true
